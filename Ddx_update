@@ -1,0 +1,259 @@
+import pandas as pd
+import numpy as np
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.feature_extraction.text import CountVectorizer
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import LabelEncoder
+import nltk
+from nltk.corpus import wordnet
+from nltk.tokenize import word_tokenize
+import random
+
+nltk.download('punkt')
+nltk.download('wordnet')
+
+class AdvancedSymptomChecker:
+    def __init__(self):
+        try:
+            self.symptoms_df = pd.read_csv('symptoms.csv')
+            self.combinations_df = pd.read_csv('combinations.csv')
+            self.prepare_data()
+            self.train_model()
+        except FileNotFoundError as e:
+            print(f"Error: {e}. Please ensure both CSV files are in the correct location.")
+            exit(1)
+
+    def prepare_data(self):
+        # Prepare data for machine learning model
+        self.all_symptoms = set()
+        self.all_conditions = set()
+
+        for _, row in self.symptoms_df.iterrows():
+            self.all_symptoms.add(row['Symptom'].lower())
+            self.all_conditions.update(c.strip() for c in row['Conditions'].split(','))
+
+        for _, row in self.combinations_df.iterrows():
+            self.all_symptoms.update(s.strip().lower() for s in row['Symptoms'].split(','))
+            self.all_conditions.update(c.strip() for c in row['Conditions'].split(','))
+
+        self.symptom_vectorizer = CountVectorizer(vocabulary=self.all_symptoms)
+        self.condition_encoder = LabelEncoder().fit(list(self.all_conditions))
+
+    def train_model(self):
+        # Create a training dataset
+        X = []
+        y = []
+        for _, row in self.combinations_df.iterrows():
+            symptoms = [s.strip().lower() for s in row['Symptoms'].split(',')]
+            conditions = [c.strip() for c in row['Conditions'].split(',')]
+            # Convert the sparse matrix to a dense NumPy array before appending
+            symptom_vector = self.symptom_vectorizer.transform([' '.join(symptoms)]).toarray()
+            for condition in conditions:
+                X.append(symptom_vector)
+                y.append(self.condition_encoder.transform([condition])[0])
+
+        # Stack the arrays vertically
+        X = np.vstack(X)
+        y = np.array(y)
+
+        # Train the model
+        self.model = RandomForestClassifier(n_estimators=100, random_state=42)
+        self.model.fit(X, y)
+
+    def get_symptoms(self):
+        print("Please describe your symptoms:")
+        symptoms_input = input().strip().lower()
+        tokens = word_tokenize(symptoms_input)
+        symptoms = []
+        for token in tokens:
+            if token in self.all_symptoms:
+                symptoms.append(token)
+            else:
+                synonyms = wordnet.synsets(token)
+                for syn in synonyms:
+                    for lemma in syn.lemmas():
+                        if lemma.name() in self.all_symptoms:
+                            symptoms.append(lemma.name())
+                            break
+                    if symptoms and symptoms[-1] == lemma.name():
+                        break
+        return symptoms
+
+    def get_age_gender(self):
+        while True:
+            try:
+                age = int(input("Please enter your age: "))
+                if 0 <= age <= 120:
+                    break
+                else:
+                    print("Please enter a valid age between 0 and 120.")
+            except ValueError:
+                print("Please enter a valid number for age.")
+
+        while True:
+            gender = input("Please enter your gender (M/F/O): ").upper()
+            if gender in ['M', 'F', 'O']:
+                break
+            else:
+                print("Please enter M for male, F for female, or O for other.")
+
+        return age, gender
+
+    def check_symptoms(self, symptoms, age, gender):
+        symptom_vector = self.symptom_vectorizer.transform([' '.join(symptoms)])
+        probabilities = self.model.predict_proba(symptom_vector)[0]
+        top_indices = probabilities.argsort()[-5:][::-1]
+
+        conditions = []
+        for idx in top_indices:
+            condition = self.condition_encoder.inverse_transform([idx])[0]
+            confidence = probabilities[idx] * 100
+            conditions.append((condition, confidence))
+
+        return conditions
+
+    def display_conditions(self, conditions, age, gender):
+        print(f"\nBased on your symptoms (Age: {age}, Gender: {'Male' if gender == 'M' else 'Female' if gender == 'F' else 'Other'}):")
+        for i, (condition, confidence) in enumerate(conditions, 1):
+            print(f"{i}. {condition} (Confidence: {confidence:.2f}%)")
+            self.provide_advice(condition, age, gender)
+
+    def provide_advice(self, condition, age, gender):
+        # This is a simplified advice system. In a real-world scenario, this should be much more comprehensive and verified by medical professionals.
+        general_advice = "Please consult a healthcare professional for a proper diagnosis and treatment plan."
+
+        condition_advice = {
+            "Common Cold": "Rest, stay hydrated, and consider over-the-counter cold medications.",
+            "Flu": "Rest, stay hydrated, and consult a doctor if symptoms are severe or you're in a high-risk group.",
+            "COVID-19": "Isolate yourself, rest, stay hydrated, and seek medical attention if you have difficulty breathing or other severe symptoms.",
+            "Pneumonia": "Consult a doctor for diagnosis and treatment, which may include antibiotics and rest.",
+            "Bronchitis": "Rest, stay hydrated, and consider over-the-counter pain relievers. Consult a doctor if symptoms worsen or persist.",
+            "Meningitis": "Seek immediate medical attention as meningitis can be life-threatening.",
+            "Encephalitis": "Seek immediate medical attention as encephalitis can be a serious condition.",
+            "Migraine": "Rest in a quiet, dark room, apply a cold compress, and consider over-the-counter pain relievers.",
+            "Appendicitis": "Seek immediate medical attention as appendicitis requires prompt surgical intervention.",
+            "Gastroenteritis": "Stay hydrated, rest, and consider over-the-counter medications for diarrhea and vomiting.",
+            "Pancreatitis": "Seek medical attention as pancreatitis can range from mild to severe.",
+            "Heart Attack": "Call emergency services immediately as a heart attack is a life-threatening emergency.",
+            "Pulmonary Embolism": "Seek immediate medical attention as a pulmonary embolism can be life-threatening.",
+            "Angina": "Consult a doctor for diagnosis and treatment, which may include medication and lifestyle changes.",
+            "Prostatitis": "Consult a doctor for diagnosis and treatment, which may include antibiotics, pain relievers, and lifestyle changes.",
+            "Systemic Lupus Erythematosus": "Consult a doctor for management and treatment, which may include medication, lifestyle changes, and regular monitoring.",
+            "Rheumatoid Arthritis": "Consult a doctor for management and treatment, which may include medication, physical therapy, and lifestyle changes.",
+            "Dermatomyositis": "Consult a doctor for diagnosis and treatment, which may include medication and physical therapy.",
+            "Viral Bronchitis": "Rest, stay hydrated, and consider over-the-counter pain relievers. Consult a doctor if symptoms worsen or persist.",
+            "Strep Throat": "Consult a doctor for diagnosis and treatment with antibiotics.",
+            "Mononucleosis": "Rest, stay hydrated, and avoid contact sports to prevent spleen rupture.",
+            "Tonsillitis": "Consult a doctor for diagnosis and treatment, which may include antibiotics or tonsillectomy in recurrent cases.",
+            "Allergic Rhinitis": "Identify and avoid allergens, consider over-the-counter antihistamines, and consult a doctor if symptoms are severe.",
+            "Subarachnoid Hemorrhage": "Seek immediate medical attention as a subarachnoid hemorrhage is a life-threatening emergency.",
+            "Chronic Kidney Disease": "Consult a doctor for management and treatment, which may include medication, dietary changes, and dialysis or kidney transplant in advanced cases.",
+            "Diabetes Mellitus": "Consult a doctor for diagnosis and management, which may include medication, lifestyle changes, and regular monitoring of blood sugar levels.",
+            "Hyperglycemia": "Consult a doctor for diagnosis and management, which may include medication and lifestyle changes.",
+            "Diabetic Ketoacidosis": "Seek immediate medical attention as diabetic ketoacidosis is a serious complication of diabetes.",
+            "Deep Vein Thrombosis (DVT)": "Seek immediate medical attention as a DVT can be life-threatening.",
+            "Cellulitis": "Consult a doctor for diagnosis and treatment, which typically involves antibiotics.",
+            "Muscle Strain": "Rest, apply ice, and consider over-the-counter pain relievers.",
+            "Lung Cancer": "Consult a doctor for diagnosis and treatment, which may include surgery, chemotherapy, radiation therapy, or immunotherapy.",
+            "Bronchiectasis": "Consult a doctor for management and treatment, which may include medication, pulmonary rehabilitation, and oxygen therapy.",
+            "Meningococcemia": "Seek immediate medical attention as meningococcemia is a life-threatening infection.",
+            "Scarlet Fever": "Consult a doctor for diagnosis and treatment with antibiotics.",
+            "Toxic Shock Syndrome": "Seek immediate medical attention as toxic shock syndrome is a life-threatening condition.",
+            "Rhabdomyolysis": "Seek medical attention as rhabdomyolysis can lead to kidney damage.",
+            "Viral Myositis": "Rest, stay hydrated, and consider over-the-counter pain relievers. Consult a doctor if symptoms worsen.",
+            "Hemolytic Anemia": "Consult a doctor to determine the cause of hemolytic anemia and discuss treatment options.",
+            "Brain Tumor": "Consult a doctor for diagnosis and treatment, which may include surgery, radiation therapy, or chemotherapy.",
+            "Pseudotumor Cerebri": "Consult a doctor for diagnosis and treatment, which may include medication, weight loss, or surgery.",
+            "Pyelonephritis": "Consult a doctor for diagnosis and treatment, which typically involves antibiotics.",
+            "Kidney Stones": "Consult a doctor for diagnosis and treatment, which may include pain relievers, fluids, and in some cases, surgery or lithotripsy.",
+            "Renal Abscess": "Consult a doctor for diagnosis and treatment, which typically involves antibiotics and drainage of the abscess.",
+            "Sepsis": "Seek immediate medical attention as sepsis is a life-threatening condition.",
+            "Fulminant Hepatitis": "Seek immediate medical attention as fulminant hepatitis is a life-threatening condition.",
+            "Leptospirosis": "Consult a doctor for diagnosis and treatment, which typically involves antibiotics.",
+            "Epiglottitis": "Seek immediate medical attention as epiglottitis can be life-threatening.",
+            "Peritonsillar Abscess": "Consult a doctor for diagnosis and treatment, which typically involves drainage of the abscess and antibiotics.",
+            "Ludwig's Angina": "Seek immediate medical attention as Ludwig's angina can be life-threatening.",
+            "Rocky Mountain Spotted Fever": "Consult a doctor for diagnosis and treatment with antibiotics.",
+            "Endocarditis": "Consult a doctor for diagnosis and treatment, which typically involves a long course of antibiotics.",
+            "Aortic Dissection": "Seek immediate medical attention as an aortic dissection is a life-threatening emergency.",
+            "Stroke": "Call emergency services immediately as a stroke is a life-threatening emergency.",
+            "Hypoglycemia": "Consume a sugary drink or food to raise blood sugar levels and seek medical attention if symptoms don't improve.",
+            "Anemia": "Consult a doctor to determine the cause of anemia and discuss treatment options.",
+            "Dengue Fever": "Rest, stay hydrated, and take over-the-counter pain relievers. Seek medical attention if symptoms worsen.",
+            "Rubella": "Isolate yourself to prevent spreading the infection, rest, and stay hydrated.",
+            "Rheumatic Fever": "Consult a doctor for diagnosis and treatment, which may include antibiotics and anti-inflammatory medications.",
+            "Tuberculosis": "Consult a doctor for diagnosis and treatment, which typically involves a long course of antibiotics.",
+            "HIV/AIDS": "Consult a doctor for diagnosis and treatment with antiretroviral therapy.",
+            "Lymphoma": "Consult a doctor for diagnosis and treatment, which may include chemotherapy, radiation therapy, or immunotherapy.",
+            "Gastric Reflux": "Avoid trigger foods, eat smaller meals, and consider over-the-counter antacids.",
+            "Panic Attack": "Practice relaxation techniques, such as deep breathing, and seek professional help if panic attacks are frequent.",
+            "Asthma": "Use your prescribed inhaler as directed and seek medical attention if you have difficulty breathing.",
+            "Chronic Obstructive Pulmonary Disease (COPD)": "Consult a doctor for management and treatment, which may include medication, pulmonary rehabilitation, and oxygen therapy.",
+            "Heart Failure": "Consult a doctor for diagnosis and treatment, which may include medication, lifestyle changes, and in severe cases, surgery or a heart transplant.",
+            "Cluster Headache": "Seek medical attention for diagnosis and treatment, which may include oxygen therapy, triptans, or other medications.",
+            "Crohn's Disease": "Consult a doctor for management and treatment, which may include medication, dietary changes, and surgery in some cases.",
+            "Celiac Disease": "Follow a strict gluten-free diet to manage symptoms and prevent complications.",
+            "Irritable Bowel Syndrome (IBS)": "Identify and avoid trigger foods, manage stress, and consider over-the-counter medications for symptom relief.",
+            "Hepatitis": "Consult a doctor for diagnosis and treatment, which may vary depending on the type of hepatitis.",
+            "Gallstones": "Consult a doctor for diagnosis and treatment, which may include medication, lifestyle changes, or surgery.",
+            "Anxiety Disorder": "Seek professional help for diagnosis and treatment, which may include therapy, medication, or a combination of both.",
+            "Hyperthyroidism": "Consult a doctor for diagnosis and treatment, which may include medication, radioactive iodine therapy, or surgery.",
+            "Cushing's Syndrome": "Consult a doctor for diagnosis and treatment, which may involve surgery, medication, or radiation therapy.",
+            "Chronic Fatigue Syndrome": "Consult a doctor for diagnosis and management, which may include therapy, medication, and lifestyle changes.",
+            "Urinary Tract Infection (UTI)": "Consult a doctor for diagnosis and treatment, which typically involves antibiotics.",
+            "Myocardial Infarction": "Call emergency services immediately as a myocardial infarction (heart attack) is a life-threatening emergency.",
+            "Ulcerative Colitis": "Consult a doctor for management and treatment, which may include medication, dietary changes, and surgery in some cases.",
+            "Ischemic Colitis": "Seek medical attention as ischemic colitis can be a serious condition.",
+            "Transient Ischemic Attack (TIA)": "Seek immediate medical attention as a TIA is a warning sign of a potential stroke.",
+            "Multiple Sclerosis": "Consult a doctor for diagnosis and management, which may include medication and therapies.",
+            "Spinal Abscess": "Consult a doctor for diagnosis and treatment, which typically involves antibiotics and drainage of the abscess.",
+            "Discitis": "Consult a doctor for diagnosis and treatment, which may include antibiotics, pain relievers, and physical therapy.",
+            "Viral Exanthem": "Rest, stay hydrated, and consider over-the-counter medications for symptom relief.",
+            "Kawasaki Disease": "Consult a doctor for diagnosis and treatment, which typically involves intravenous immunoglobulin and aspirin.",
+            "Pancreatic Cancer": "Consult a doctor for diagnosis and treatment, which may include surgery, chemotherapy, radiation therapy, or a combination of these.",
+            "Cholangiocarcinoma": "Consult a doctor for diagnosis and treatment, which may include surgery, chemotherapy, radiation therapy, or a combination of these.",
+            "Chronic Pancreatitis": "Consult a doctor for management and treatment, which may include pain management, dietary changes, and in some cases, surgery.",
+            "Hypertensive Encephalopathy": "Seek immediate medical attention as hypertensive encephalopathy is a serious condition.",
+            "Lung Abscess": "Consult a doctor for diagnosis and treatment, which typically involves antibiotics and drainage of the abscess.",
+            "Liver Cirrhosis": "Consult a doctor for management and treatment, which may include medication, lifestyle changes, and in advanced cases, liver transplant.",
+            "Primary Biliary Cholangitis": "Consult a doctor for management and treatment, which may include medication and in advanced cases, liver transplant.",
+            "Pneumothorax": "Seek medical attention as a pneumothorax can be a serious condition.",
+            "Laryngeal Cancer": "Consult a doctor for diagnosis and treatment, which may include surgery, radiation therapy, or chemotherapy.",
+            "Gastroesophageal Reflux Disease (GERD)": "Avoid trigger foods, eat smaller meals, and consider over-the-counter antacids. Consult a doctor if symptoms persist.",
+            "Vocal Cord Nodules": "Rest your voice, avoid irritants, and consult a doctor if hoarseness persists.",
+            "Lactose Intolerance": "Avoid dairy products or use lactase supplements to manage symptoms.",
+            "Pericarditis": "Consult a doctor for diagnosis and treatment, which may include medication and rest.",
+            "Hypotension": "Consult a doctor to determine the cause of low blood pressure and discuss treatment options.",
+            "Atrial Fibrillation": "Consult a doctor for diagnosis and treatment, which may include medication, cardioversion, or ablation.",
+            "Salmonella Infection": "Stay hydrated, rest, and consult a doctor if symptoms are severe or persist.",
+            "E. coli Infection": "Stay hydrated, rest, and consult a doctor if symptoms are severe or persist.",
+            "Lyme Disease": "Consult a doctor for diagnosis and treatment with antibiotics.",
+            "Ovarian Cancer": "Consult a doctor for diagnosis and treatment, which may include surgery, chemotherapy, and radiation therapy.",
+            "Gastric Cancer": "Consult a doctor for diagnosis and treatment, which may include surgery, chemotherapy, radiation therapy, or a combination of these.",
+            "Congestive Heart Failure": "Consult a doctor for diagnosis and treatment, which may include medication, lifestyle changes, and in severe cases, surgery or a heart transplant.",
+            "Nephrotic Syndrome": "Consult a doctor for diagnosis and treatment, which may include medication, dietary changes, and in some cases, dialysis or kidney transplant.",
+            "Septicemia": "Seek immediate medical attention as septicemia is a life-threatening condition.",
+            "Bronchiolitis": "Consult a doctor for diagnosis and treatment, especially in infants and young children.",
+            "Rotavirus Infection": "Stay hydrated and consult a doctor if symptoms are severe, especially in infants and young children.",
+            "Roseola": "Rest, stay hydrated, and consult a doctor if symptoms are severe, especially in infants and young children.",
+            "Glomerulonephritis": "Consult a doctor for diagnosis and treatment, which may include medication, dietary changes, and in some cases, dialysis or kidney transplant.",
+            "Acute Kidney Injury": "Seek medical attention as acute kidney injury can be a serious condition.",
+}
+        print(f"Advice for {condition}:")
+        print(condition_advice.get(condition, general_advice))
+        print(general_advice)
+
+    def run(self):
+        while True:
+            symptoms = self.get_symptoms()
+            age, gender = self.get_age_gender()
+            conditions = self.check_symptoms(symptoms, age, gender)
+            self.display_conditions(conditions, age, gender)
+
+            print("\nWould you like to check more symptoms? (y/n)")
+            if input().lower() != "y":
+                break
+
+if __name__ == "__main__":
+    checker = AdvancedSymptomChecker()
+    checker.run()
